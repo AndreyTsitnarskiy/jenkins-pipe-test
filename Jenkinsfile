@@ -15,7 +15,7 @@ pipeline {
                     // Клонируем репозиторий
                     git branch: params.BRANCH,
                          url: params.REPO_URL,
-                         credentialsId: 'git-creds'  // ID SSH-ключа или логина/пароля в Jenkins
+                         credentialsId: 'git_key'  // ID SSH-ключа или логина/пароля в Jenkins
                 }
             }
         }
