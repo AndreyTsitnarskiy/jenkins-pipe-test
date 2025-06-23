@@ -6,6 +6,7 @@ pipeline {
         string(name: 'REPO_URL', defaultValue: 'https://github.com/user/repo.git', description: 'URL Git-репозитория')
         string(name: 'BRANCH', defaultValue: 'main', description: 'Ветка для анализа')
         string(name: 'SINCE_DATE', defaultValue: '1 week ago', description: 'Период (e.g., "2023-01-01" или "2 weeks ago")')
+        choice(name: 'OUTPUT_FORMAT', choices: ['JSON', 'YAML', 'TEXT'], description: 'Формат вывода')
     }
     stages {
         stage('Clone Repository') {
@@ -14,36 +15,26 @@ pipeline {
                     // Клонируем репозиторий
                     git branch: params.BRANCH,
                          url: params.REPO_URL,
-                         credentialsId: 'git-creds'  // ID SSH-ключа или логина/пароля в Jenkins
+                         credentialsId: 'git_key'  // ID SSH-ключа или логина/пароля в Jenkins
                 }
             }
         }
         stage('Analyze Git Log') {
             steps {
                 script {
-                    // Получаем и анализируем историю коммитов
-                    def gitLog = sh(
-                        script: """
-                            git log \
-                            --since="${params.SINCE_DATE}" \
-                            --pretty=format:'%h | %an | %ad | %s' \
-                            --date=short
-                        """,
-                        returnStdout: true
-                    ).trim()
+                    def report = gitParser(
+                        format: params.OUTPUT_FORMAT,
+                        since: params.SINCE_DATE
+                    )
 
-                    // Форматируем вывод
-                    git_utils.formatGitLog(gitLog)
-
-                    // Сохраняем в артефакт
-                    writeFile file: 'git_history.txt', text: gitLog
+                    writeFile file: "report.${params.OUTPUT_FORMAT.toLowerCase()}", text: report
                 }
             }
         }
     }
     post {
         always {
-            archiveArtifacts artifacts: 'git_history.txt', fingerprint: true
+            archiveArtifacts artifacts: "report.${params.OUTPUT_FORMAT.toLowerCase()}"
         }
     }
 }
