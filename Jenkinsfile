@@ -1,6 +1,5 @@
-@Library('git_utils') _  // Подключаем библиотеку
+@Library('git_utils') _
 
-// Параметры (можно задать через Jenkins UI)
 properties([
     parameters([
         string(name: 'REPO_URL', defaultValue: 'https://github.com/user/repo.git', description: 'Git repo URL'),
@@ -10,36 +9,57 @@ properties([
     ])
 ])
 
-// Сам Pipeline
 node {
-    stage('Checkout') {
-        checkout([
-            $class: 'GitSCM',
-            branches: [[name: params.BRANCH]],
-            userRemoteConfigs: [[url: params.REPO_URL, credentialsId: 'git_key']]
-        ])
-    }
-
-    stage('Get Git Log') {
-        script {
-            // Получаем raw-лог (опасная операция — делаем в Jenkinsfile)
-            def rawLog = sh(
-                script: "git log --since='${params.SINCE_DATE}' --pretty=format:'%h | %an | %ad | %s' --date=short",
-                returnStdout: true
-            ).trim()
-
-            // Передаем в библиотеку для парсинга
-            def report = gitParser(
-                rawLog: rawLog,
-                format: params.OUTPUT_FORMAT
-            )
-
-            // Сохраняем отчет
-            writeFile file: "report.${params.OUTPUT_FORMAT.toLowerCase()}", text: report
-            archiveArtifacts artifacts: "report.${params.OUTPUT_FORMAT.toLowerCase()}"
-
-            // Выводим результат (опционально)
-            echo "Report:\n${report}"
+    try {
+        stage('Checkout') {
+            script {
+                try {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: params.BRANCH]],
+                        userRemoteConfigs: [[url: params.REPO_URL, credentialsId: 'git_key']]
+                    ])
+                } catch (Exception e) {
+                    // Репозиторий недоступен или нет прав
+                    unstable("Checkout failed: ${e.message}")
+                    return  // Прерываем Pipeline, но статус UNSTABLE
+                }
+            }
         }
+
+        stage('Get Git Log') {
+            script {
+                def rawLog = ""
+                try {
+                    rawLog = sh(
+                        script: "git log --since='${params.SINCE_DATE}' --pretty=format:'%h | %an | %ad | %s' --date=short",
+                        returnStdout: true
+                    ).trim()
+
+                    if (!rawLog) {
+                        unstable("No commits found since ${params.SINCE_DATE}")
+                        return
+                    }
+
+                } catch (Exception e) {
+                    // Ошибка выполнения git log (например, ветки не существует)
+                    unstable("Git log error: ${e.message}")
+                    return
+                }
+
+                // Парсинг (ошибки здесь будут FAILED, так как это логика библиотеки)
+                def report = gitParser(
+                    rawLog: rawLog,
+                    format: params.OUTPUT_FORMAT
+                )
+
+                writeFile file: "report.${params.OUTPUT_FORMAT.toLowerCase()}", text: report
+                archiveArtifacts artifacts: "report.${params.OUTPUT_FORMAT.toLowerCase()}"
+            }
+        }
+
+    } catch (Exception e) {
+        currentBuild.result = 'FAILURE'
+        error("Pipeline failed: ${e.message}")
     }
 }
