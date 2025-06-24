@@ -1,40 +1,45 @@
-@Library('git_utils') _  // Подключаем вашу библиотеку
+@Library('git_utils') _  // Подключаем библиотеку
 
-pipeline {
-    agent any
-    parameters {
-        string(name: 'REPO_URL', defaultValue: 'https://github.com/user/repo.git', description: 'URL Git-репозитория')
-        string(name: 'BRANCH', defaultValue: 'main', description: 'Ветка для анализа')
-        string(name: 'SINCE_DATE', defaultValue: '1 week ago', description: 'Период (e.g., "2023-01-01" или "2 weeks ago")')
-        choice(name: 'OUTPUT_FORMAT', choices: ['JSON', 'YAML', 'TEXT'], description: 'Формат вывода')
-    }
-    stages {
-        stage('Clone Repository') {
-            steps {
-                script {
-                    // Клонируем репозиторий
-                    git branch: params.BRANCH,
-                         url: params.REPO_URL,
-                         credentialsId: 'git_key'  // ID SSH-ключа или логина/пароля в Jenkins
-                }
-            }
-        }
-        stage('Analyze Git Log') {
-            steps {
-                script {
-                    def report = gitParser(
-                        format: params.OUTPUT_FORMAT,
-                        since: params.SINCE_DATE
-                    )
+// Параметры (можно задать через Jenkins UI)
+properties([
+    parameters([
+        string(name: 'REPO_URL', defaultValue: 'https://github.com/user/repo.git', description: 'Git repo URL'),
+        string(name: 'BRANCH', defaultValue: 'main', description: 'Branch to analyze'),
+        string(name: 'SINCE_DATE', defaultValue: '1 week ago', description: 'Period (e.g., "2023-01-01" or "2 weeks ago")'),
+        choice(name: 'OUTPUT_FORMAT', choices: ['JSON', 'YAML', 'TEXT'], description: 'Output format')
+    ])
+])
 
-                    writeFile file: "report.${params.OUTPUT_FORMAT.toLowerCase()}", text: report
-                }
-            }
-        }
+// Сам Pipeline
+node {
+    stage('Checkout') {
+        checkout([
+            $class: 'GitSCM',
+            branches: [[name: params.BRANCH]],
+            userRemoteConfigs: [[url: params.REPO_URL, credentialsId: 'git_key']]
+        ])
     }
-    post {
-        always {
+
+    stage('Get Git Log') {
+        script {
+            // Получаем raw-лог (опасная операция — делаем в Jenkinsfile)
+            def rawLog = sh(
+                script: "git log --since='${params.SINCE_DATE}' --pretty=format:'%h | %an | %ad | %s' --date=short",
+                returnStdout: true
+            ).trim()
+
+            // Передаем в библиотеку для парсинга
+            def report = gitParser(
+                rawLog: rawLog,
+                format: params.OUTPUT_FORMAT
+            )
+
+            // Сохраняем отчет
+            writeFile file: "report.${params.OUTPUT_FORMAT.toLowerCase()}", text: report
             archiveArtifacts artifacts: "report.${params.OUTPUT_FORMAT.toLowerCase()}"
+
+            // Выводим результат (опционально)
+            echo "Report:\n${report}"
         }
     }
 }
