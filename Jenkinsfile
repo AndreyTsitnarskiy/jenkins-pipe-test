@@ -20,9 +20,8 @@ node {
                         userRemoteConfigs: [[url: params.REPO_URL, credentialsId: 'git_key']]
                     ])
                 } catch (Exception e) {
-                    // Репозиторий недоступен или нет прав
                     unstable("Checkout failed: ${e.message}")
-                    return  // Прерываем Pipeline, но статус UNSTABLE
+                    return
                 }
             }
         }
@@ -42,12 +41,10 @@ node {
                     }
 
                 } catch (Exception e) {
-                    // Ошибка выполнения git log (например, ветки не существует)
                     unstable("Git log error: ${e.message}")
                     return
                 }
 
-                // Парсинг (ошибки здесь будут FAILED, так как это логика библиотеки)
                 def report = gitParser(
                     rawLog: rawLog,
                     format: params.OUTPUT_FORMAT

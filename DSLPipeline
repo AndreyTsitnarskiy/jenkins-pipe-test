@@ -1,0 +1,75 @@
+@Library('git_utils') _
+
+properties([
+    parameters([
+        string(name: 'REPO_URL', defaultValue: 'https://github.com/user/repo.git', description: 'Git repo URL'),
+        string(name: 'BRANCH', defaultValue: 'main', description: 'Branch to analyze'),
+        string(name: 'SINCE_DATE', defaultValue: '1 week ago', description: 'Period (e.g., "2023-01-01" or "2 weeks ago")'),
+        choice(name: 'OUTPUT_FORMAT', choices: ['JSON', 'YAML', 'TEXT'], description: 'Output format')
+    ])
+])
+
+pipeline {
+    agent any
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: params.BRANCH]],
+                        userRemoteConfigs: [[url: params.REPO_URL, credentialsId: 'git_key']]
+                    ])
+                }
+            }
+        }
+
+        stage('Get Git Log') {
+            steps {
+                script {
+                    def rawLog = sh(
+                        script: "git log --since='${params.SINCE_DATE}' --pretty=format:'%h | %an | %ad | %s' --date=short",
+                        returnStdout: true
+                    ).trim()
+
+                    if (!rawLog) {
+                        currentBuild.result = 'UNSTABLE'
+                        error("No commits found since ${params.SINCE_DATE}")
+                    }
+
+                    def report = gitParser(
+                        rawLog: rawLog,
+                        format: params.OUTPUT_FORMAT
+                    )
+                    writeFile file: "report.${params.OUTPUT_FORMAT.toLowerCase()}", text: report
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Билд успешен! Сохраняем артефакты."
+            archiveArtifacts artifacts: "report.${params.OUTPUT_FORMAT.toLowerCase()}"
+        }
+        unstable {
+            echo "⚠️ Билд нестабилен: ${currentBuild.currentResult}"
+            emailext (
+                subject: "Jenkins Build UNSTABLE: ${env.JOB_NAME}",
+                body: "Проверьте параметры (ветка, дата). Подробности: ${env.BUILD_URL}",
+                to: 'dev@example.com'
+            )
+        }
+        failure {
+            echo "❌ Билд упал: ${currentBuild.currentResult}"
+            slackSend channel: '#alerts', message: "FAILED: ${env.JOB_NAME} (${env.BUILD_URL})"
+        }
+        aborted {
+            echo "🚫 Билд отменен вручную"
+        }
+        always {
+            echo "🧹 Очистка рабочей директории"
+            deleteDir()  // Удаляем workspace (опционально)
+        }
+    }
+}
